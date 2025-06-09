@@ -29,7 +29,6 @@ def download_logo(brand, save_path):
 
     # Special mappings for known brands
     brand_domains = {
-        "mcdonalds": "mcdonalds.com",
         "southwest": "southwest.com",
         "autozone": "autozone.com",
         "ulta": "ulta.com",
@@ -39,8 +38,6 @@ def download_logo(brand, save_path):
         "kwiktrip": "kwiktrip.com",
         "krispykreme": "krispykreme.com",
         "jewelosco": "jewelosco.com",
-        "binnys": "binnys.com",
-        "binny's": "binnys.com",  # Handle apostrophe variation
         "niagara": "niagarawater.com",
         "niagarawater": "niagarawater.com"
     }
@@ -100,8 +97,6 @@ def create_text_logo(brand, save_path):
 
     # Brand-specific colors
     brand_colors = {
-        "McDonald's": (255, 199, 44),  # McDonald's yellow
-        "Binny's": (139, 0, 0),  # Dark red
         "AutoZone": (255, 0, 0),  # Red
         "Southwest": (0, 0, 139),  # Dark blue
     }
@@ -110,12 +105,7 @@ def create_text_logo(brand, save_path):
     color = brand_colors.get(brand, (100, 100, 100))
 
     # Get initials or short name
-    if brand == "McDonald's":
-        text = "M"
-    elif brand == "Binny's":
-        text = "B"
-    else:
-        text = ''.join([word[0].upper() for word in brand.split()[:2]])
+    text = ''.join([word[0].upper() for word in brand.split()[:2]])
 
     # Calculate text size (approximate)
     font_size = 200 if len(text) == 1 else 150
@@ -131,26 +121,29 @@ def create_text_logo(brand, save_path):
 def generate_professional_wheel(csv_file="mock_fan_wheel.csv",
                                 output_file="professional_fan_wheel.png",
                                 center_text="THE SKY FAN",
-                                team_color="#1D428A"):  # Utah Jazz blue
+                                team_color="#1D428A",
+                                force_regenerate=True):  # Utah Jazz blue
 
-    # Load or create data
-    if not os.path.exists(csv_file):
-        data = {
-            'brand': ['AutoZone', 'Southwest', 'Klarna', 'Kwik Trip', 'Wayfair',
-                      'GrubHub', 'Ulta', "Binnys", 'Krispy Kreme', 'Jewel-Osco',
-                      'Niagara Water', "McDonalds"],
-            'behavior': ['Shops at\nAutoZone', 'Flys with\nSouthwest', 'Pays with\nKlarna',
-                         'Fills up at\nKwik Trip', 'Decorates with\nWayfair', 'Delivery with\nGrubHub',
-                         'Beauty at\nUlta', "Drinks from\nBinnys", 'Indulges at\nKrispy Kreme',
-                         'Groceries at\nJewel-Osco', 'Drinks\nNiagara Water', "Eats at\nMcDonalds"],
-            'logo_path': [''] * 12
-        }
-        df = pd.DataFrame(data)
-        df.to_csv(csv_file, index=False)
+    # Load or create data - REMOVED McDonald's and Binny's
+    # Always create fresh data with 10 brands
+    data = {
+        'brand': ['AutoZone', 'Southwest', 'Klarna', 'Kwik Trip', 'Wayfair',
+                  'GrubHub', 'Ulta', 'Krispy Kreme', 'Jewel-Osco',
+                  'Niagara Water'],  # Removed McDonald's and Binny's
+        'behavior': ['Shops at\nAutoZone', 'Flys with\nSouthwest', 'Pays with\nKlarna',
+                     'Fills up at\nKwik Trip', 'Decorates with\nWayfair', 'Delivery with\nGrubHub',
+                     'Beauty at\nUlta', 'Indulges at\nKrispy Kreme',
+                     'Groceries at\nJewel-Osco', 'Drinks\nNiagara Water'],  # Removed corresponding behaviors
+        'logo_path': [''] * 10  # Changed from 12 to 10
+    }
+    df = pd.DataFrame(data)
+    df.to_csv(csv_file, index=False)
+    print(f"✅ Created new CSV file with {len(df)} brands")
 
     # Load data - always print what we're working with
     df = pd.read_csv(csv_file)
     print("\n=== Loaded brand data ===")
+    print(f"Total brands: {len(df)}")
     for idx, row in df.iterrows():
         print(f"Brand {idx}: '{row['brand']}' (length: {len(row['brand'])})")
     print("========================\n")
@@ -281,7 +274,7 @@ def generate_professional_wheel(csv_file="mock_fan_wheel.csv",
     # Add center text
     ax.text(0, 0, center_text,
             ha='center', va='center',
-            fontsize=20, fontweight='bold',
+            fontsize=24, fontweight='bold',  # Increased from 20
             color='white', zorder=21)
 
     # Add logos and text inside wedges
@@ -358,7 +351,7 @@ def generate_professional_wheel(csv_file="mock_fan_wheel.csv",
 
         ax.text(text_x, text_y, formatted_text,
                 ha='center', va='center',
-                fontsize=11, fontweight='bold',  # Increased from 9 to 11
+                fontsize=14, fontweight='bold',  # Increased from 11 to 14
                 color='white',  # WHITE TEXT
                 rotation=0,  # No rotation - keep horizontal
                 linespacing=0.8,  # Tighter line spacing
@@ -371,6 +364,7 @@ def generate_professional_wheel(csv_file="mock_fan_wheel.csv",
     plt.close()
 
     print(f"\n✅ Professional fan wheel saved as {output_file}")
+    print(f"✅ Generated wheel with {num_items} brands")
     return output_file
 
 
