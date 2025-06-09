@@ -1,60 +1,30 @@
 #!/usr/bin/env python3
-
 """
 Complete script to query Snowflake and generate audience index chart
-Updated to use RSA key pair authentication (no password or MFA)
+Updated to use centralized connection for authentication only
 """
 
-import snowflake.connector
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
 import numpy as np
-from dotenv import load_dotenv
-import os
 from datetime import datetime
-from cryptography.hazmat.primitives import serialization
+
+# Import just the connection from centralized manager
+from snowflake_connection import get_connection
 
 
 def query_snowflake():
-    """Connect to Snowflake using key pair and get top 10 communities by COMPOSITE_INDEX"""
-
-    load_dotenv()
-    private_key_path = os.getenv('PRIVATE_KEY_PATH')
-
-    if not private_key_path:
-        print("❌ Error: PRIVATE_KEY_PATH not found in .env file")
-        return None
-
-    # Load private key
-    with open(private_key_path, "rb") as key_file:
-        p_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=None,
-        )
-
-    private_key_bytes = p_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
-    )
-
-    # Snowflake connection parameters
-    config = {
-        'account': 'JZJIKIA-GDA24737',
-        'user': 'travis@twinbrain.ai',
-        'private_key': private_key_bytes,
-        'warehouse': 'COMPUTE_WH',
-        'database': 'SIL__TB_OTT_TEST',
-        'schema': 'SC_TWINBRAINAI'
-    }
+    """Connect to Snowflake using centralized connection and get top 10 communities"""
 
     try:
-        print("🔄 Connecting to Snowflake using RSA key pair...")
-        conn = snowflake.connector.connect(**config)
+        print("🔄 Connecting to Snowflake...")
+        # Get connection from centralized manager
+        conn = get_connection()
         print("✅ Connected successfully!")
 
+        # Your original query exactly as it was
         query = """
         SELECT 
             COMMUNITY,
@@ -98,8 +68,10 @@ def query_snowflake():
         """
 
         print("📊 Executing query...")
+        # Your original pd.read_sql approach
         df = pd.read_sql(query, conn)
-        conn.close()
+
+        # Don't close the connection - let the manager handle it
         print("✅ Data retrieved successfully!")
         return df
 
@@ -109,7 +81,7 @@ def query_snowflake():
 
 
 def create_audience_index_chart(df, save_path='audience_index_chart.png'):
-    """Render chart using SIL visual style"""
+    """Render chart using SIL visual style - NO CHANGES NEEDED"""
 
     print("\n🎨 Creating chart...")
 
@@ -172,6 +144,7 @@ def create_audience_index_chart(df, save_path='audience_index_chart.png'):
 
 
 def main():
+    """Main function - NO CHANGES NEEDED"""
     print("🏀 Utah Jazz Community Index Chart Generator")
     print("=" * 50)
 
