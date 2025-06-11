@@ -44,15 +44,15 @@ class JazzInsightsSlideGenerator:
         self.current_file = Path(__file__).resolve()
         self.current_dir = self.current_file.parent
 
-        # Check if we're already in 'graphics/slide 2' directory
-        if self.current_dir.name == 'slide 2' and self.current_dir.parent.name == 'graphics':
-            # We're in the graphics/slide 2 directory
+        # Check if we're already in 'graphics/Slide 2' directory
+        if self.current_dir.name == 'Slide 2' and self.current_dir.parent.name == 'graphics':
+            # We're in the graphics/Slide 2 directory
             self.base_dir = self.current_dir.parent.parent  # Go up to project root
             self.scripts_dir = self.current_dir
         else:
             # We're somewhere else (maybe project root)
             self.base_dir = self.current_dir
-            self.scripts_dir = self.base_dir / 'graphics' / 'slide 2'
+            self.scripts_dir = self.base_dir / 'graphics' / 'Slide 2'
 
         print(f"📁 Working directories:")
         print(f"   Base directory: {self.base_dir}")
