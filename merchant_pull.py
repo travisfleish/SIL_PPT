@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 """
-Fixed Merchant Pull Script with Audience Percentages
-Shows PERC_AUDIENCE for both communities and merchants
+Fixed Merchant Pull Script with Threshold Status:
+- Communities: PERC_AUDIENCE >= 0.20, Top 10 by COMPOSITE_INDEX
+- Merchants: Top 1 per community (unchanged logic)
+- Added: Threshold qualification status in CSV
 """
 
 import pandas as pd
-import os
 from pathlib import Path
-import json
 from datetime import datetime
 import logging
-from typing import Dict, List, Optional
-
-# Import Snowflake connection
+from typing import Dict, List
 from snowflake_connection import query_to_dataframe
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# APPROVED COMMUNITIES (same as before)
+# Threshold constants for qualification check
+AUDIENCE_COUNT_THRESHOLD = 100
+PERC_AUDIENCE_THRESHOLD = 0.10
+
 APPROVED_COMMUNITIES = {
     "Adult Recreational Sports": "Plays",
     "Alternative Wellness": "Shops",
@@ -38,7 +36,6 @@ APPROVED_COMMUNITIES = {
     "Concerts and Festivals": "Attends",
     "Cultural Arts": "Enjoys",
     "Daters": "Dates on",
-    "Disney Diehards": "Visits",
     "DIY Arts & Crafts": "Creates",
     "Dollar Store Shoppers": "Saves with",
     "Domestic Decorators": "Decorates with",
@@ -88,36 +85,39 @@ APPROVED_COMMUNITIES = {
 
 
 def get_approved_communities_sql():
-    """Generate SQL IN clause for approved communities"""
-    if not APPROVED_COMMUNITIES:
-        return "''"
-
-    # Escape single quotes in community names
-    escaped = []
-    for c in APPROVED_COMMUNITIES.keys():
-        escaped_name = c.replace("'", "''")
-        escaped.append(f"'{escaped_name}'")
+    escaped = ["'" + c.replace("'", "''") + "'" for c in APPROVED_COMMUNITIES]
     return ', '.join(escaped)
 
 
-class MerchantPull:
-    """Pull merchants for teams using same logic as wheel generator"""
+def check_qualification(audience_count, perc_audience):
+    """Check if a merchant meets the threshold criteria (only count and percentage)"""
 
+    # Only check the two main thresholds
+    meets_count = audience_count > AUDIENCE_COUNT_THRESHOLD
+    meets_perc = perc_audience >= PERC_AUDIENCE_THRESHOLD
+
+    if not meets_count:
+        return False, "LOW_AUDIENCE_COUNT"
+    elif not meets_perc:
+        return False, "LOW_PERC_AUDIENCE"
+    else:
+        return True, "MEETS_CRITERIA"
+
+
+class MerchantPull:
     def __init__(self):
-        # Create output directory
         self.output_dir = Path("merchant_data")
         self.output_dir.mkdir(exist_ok=True)
 
-        # Team configurations with CORRECTED comparison populations
         self.teams = [
             {
                 'team_name': 'Utah Jazz',
                 'team_name_short': 'Jazz',
                 'league': 'NBA',
                 'community_view': 'V_UTAH_JAZZ_SIL_COMMUNITY_INDEXING_ALL_TIME',
-                'merchant_view': 'V_SIL_COMMUNITY_MERCHANT_INDEXING_ALL_TIME',
+                'merchant_view': 'V_UTAH_JAZZ_SIL_COMMUNITY_MERCHANT_INDEXING_ALL_TIME',
                 'audience_name': 'Utah Jazz Fans',
-                'comparison_population': 'Local Gen Pop (Excl. Jazz)'  # Keep as is - working
+                'comparison_population': 'Local Gen Pop (Excl. Jazz)'
             },
             {
                 'team_name': 'Dallas Cowboys',
@@ -126,13 +126,11 @@ class MerchantPull:
                 'community_view': 'V_DALLAS_COWBOYS_COMMUNITY_INDEXING_ALL_TIME',
                 'merchant_view': 'V_DALLAS_COWBOYS_COMMUNITY_MERCHANT_INDEXING_ALL_TIME',
                 'audience_name': 'Dallas Cowboys Fans',
-                'comparison_population': 'Local Gen Pop (Excl. Dallas Cowboys Fans)'  # FIXED!
+                'comparison_population': 'Local Gen Pop (Excl. Dallas Cowboys Fans)'
             }
         ]
 
     def fetch_team_data(self, team_config: Dict[str, str]) -> List[Dict]:
-        """Fetch top 10 communities and their top merchant for a team"""
-
         team_name = team_config['team_name']
         team_short = team_config['team_name_short']
         community_view = team_config['community_view']
@@ -141,10 +139,8 @@ class MerchantPull:
 
         logger.info(f"\n🏀 Processing {team_name}...")
 
-        # Get approved communities SQL
         approved_communities_sql = get_approved_communities_sql()
 
-        # Community query with corrected comparison population
         communities_query = f"""
         SELECT 
             COMMUNITY,
@@ -154,58 +150,60 @@ class MerchantPull:
             {community_view}
         WHERE 
             COMPARISON_POPULATION = '{comparison_population}'
-            AND PERC_AUDIENCE >= 0.25
+            AND PERC_AUDIENCE >= 0.20
             AND COMMUNITY IN ({approved_communities_sql})
         ORDER BY COMPOSITE_INDEX DESC
         LIMIT 10
         """
 
         try:
-            logger.info(f"Fetching approved communities from Snowflake...")
-            logger.info(f"Using comparison population: '{comparison_population}'")
-            logger.info(f"Total approved communities: {len(APPROVED_COMMUNITIES)}")
-
+            logger.info("Fetching top communities...")
             top_communities_df = query_to_dataframe(communities_query)
 
-            if top_communities_df.empty:
-                logger.warning(f"No approved communities found for {team_name}")
+            # Enhanced debugging with qualification check
+            logger.info("\n🔎 Debugging top merchants for each community:")
 
-                # Debug: Show what communities exist for other populations
+            for community in top_communities_df['COMMUNITY']:
                 debug_query = f"""
                 SELECT 
-                    COMPARISON_POPULATION,
-                    COUNT(DISTINCT COMMUNITY) as community_count
-                FROM {community_view}
-                WHERE COMMUNITY IN ({approved_communities_sql})
-                GROUP BY COMPARISON_POPULATION
+                    MERCHANT,
+                    PERC_AUDIENCE,
+                    AUDIENCE_COUNT,
+                    SUBCATEGORY
+                FROM {merchant_view}
+                WHERE COMMUNITY = '{community.replace("'", "''")}'
+                  AND COMPARISON_POPULATION = '{comparison_population}'
+                ORDER BY PERC_AUDIENCE DESC
+                LIMIT 1
                 """
-
                 try:
-                    debug_df = query_to_dataframe(debug_query)
-                    if not debug_df.empty:
-                        logger.info("Available comparison populations with approved communities:")
-                        for _, row in debug_df.iterrows():
-                            logger.info(f"  - {row['COMPARISON_POPULATION']}: {row['COMMUNITY_COUNT']} communities")
-                except:
-                    pass
+                    merchant_df = query_to_dataframe(debug_query)
+                    if merchant_df.empty:
+                        logger.info(f"  - {community}: ❌ No merchants found")
+                        continue
 
+                    row = merchant_df.iloc[0]
+                    qualifies, reason = check_qualification(
+                        row['AUDIENCE_COUNT'],
+                        row['PERC_AUDIENCE']
+                    )
+                    status = "✅ QUALIFIES" if qualifies else "❌ FILTERED OUT"
+
+                    logger.info(
+                        f"  - {community}: {row['MERCHANT']} | {row['PERC_AUDIENCE']:.2%} | "
+                        f"Count: {row['AUDIENCE_COUNT']} | Reason: {reason} → {status}"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"  - {community}: ⚠️ Error fetching merchant: {e}")
+
+            if top_communities_df.empty:
+                logger.warning(f"No communities found for {team_name}")
                 return []
 
-            # Create a dictionary to store community percentages
-            community_percentages = {}
-            for _, row in top_communities_df.iterrows():
-                community_percentages[row['COMMUNITY']] = row['PERC_AUDIENCE']
-
             communities = top_communities_df['COMMUNITY'].tolist()
-            logger.info(f"Found {len(communities)} top communities")
 
-            # Print communities for debugging
-            for i, (_, row) in enumerate(top_communities_df.iterrows(), 1):
-                logger.info(f"   {i}. {row['COMMUNITY']} (Index: {row['COMPOSITE_INDEX']:.0f}, Audience: {row['PERC_AUDIENCE']:.2%})")
-
-            # Enhanced merchant query that includes PERC_AUDIENCE
-            # IMPORTANT: Now ranking merchants by PERC_AUDIENCE instead of PERC_INDEX
-            # EXCLUDES professional sports subcategory for Live Entertainment Seekers
+            # Merchants query with professional sports exclusion built-in
             merchants_query = f"""
             WITH top_communities AS (
                 {communities_query}
@@ -222,15 +220,18 @@ class MerchantPull:
                     m.PERC_AUDIENCE as MERCHANT_PERC_AUDIENCE,
                     m.AUDIENCE_TOTAL_SPEND,
                     m.AUDIENCE_COUNT,
-                    ROW_NUMBER() OVER (PARTITION BY tc.COMMUNITY ORDER BY m.PERC_AUDIENCE DESC) as rn
+                    ROW_NUMBER() OVER (
+                        PARTITION BY tc.COMMUNITY 
+                        ORDER BY m.PERC_AUDIENCE DESC
+                    ) as rn
                 FROM top_communities tc
                 JOIN {merchant_view} m
                     ON tc.COMMUNITY = m.COMMUNITY
                 WHERE m.COMPARISON_POPULATION = '{comparison_population}'
-                    AND m.AUDIENCE_COUNT > 10
-                    -- Exclude professional sports subcategory for Live Entertainment Seekers
-                    AND NOT (tc.COMMUNITY = 'Live Entertainment Seekers' 
-                            AND LOWER(m.SUBCATEGORY) LIKE '%professional sports%')
+                    AND NOT (
+                        tc.COMMUNITY = 'Live Entertainment Seekers' 
+                        AND LOWER(m.SUBCATEGORY) LIKE '%professional sports%'
+                    )
             )
             SELECT 
                 COMMUNITY,
@@ -240,22 +241,33 @@ class MerchantPull:
                 CATEGORY,
                 SUBCATEGORY,
                 PERC_INDEX,
-                MERCHANT_PERC_AUDIENCE
+                MERCHANT_PERC_AUDIENCE,
+                AUDIENCE_COUNT
             FROM ranked_merchants 
             WHERE rn = 1
             ORDER BY MERCHANT_PERC_AUDIENCE DESC
             """
 
-            logger.info("Fetching top merchants for each community...")
+            logger.info("Fetching top merchants...")
             wheel_data_df = query_to_dataframe(merchants_query)
 
             if wheel_data_df.empty:
                 logger.warning(f"No merchants found for {team_name}")
                 return []
 
-            # Convert to list of dicts with both percentages
             results = []
+            qualifying_count = 0
+
             for _, row in wheel_data_df.iterrows():
+                # Check qualification using our function (only count and percentage)
+                qualifies, reason = check_qualification(
+                    row['AUDIENCE_COUNT'],
+                    row['MERCHANT_PERC_AUDIENCE']
+                )
+
+                if qualifies:
+                    qualifying_count += 1
+
                 results.append({
                     'Team': team_name,
                     'League': team_config['league'],
@@ -267,22 +279,26 @@ class MerchantPull:
                     'Subcategory': row.get('SUBCATEGORY', ''),
                     'Merchant_Perc_Index': row['PERC_INDEX'],
                     'Merchant_Perc_Audience': row['MERCHANT_PERC_AUDIENCE'],
-                    'Verb': APPROVED_COMMUNITIES.get(row['COMMUNITY'], 'Shops at')
+                    'Audience_Count': row['AUDIENCE_COUNT'],
+                    'Verb': APPROVED_COMMUNITIES.get(row['COMMUNITY'], 'Shops at'),
+                    # New threshold columns
+                    'Meets_Threshold': qualifies,
+                    'Threshold_Status': 'QUALIFIES' if qualifies else 'FILTERED_OUT',
+                    'Filter_Reason': reason,
+                    'Audience_Count_Threshold': AUDIENCE_COUNT_THRESHOLD,
+                    'Perc_Audience_Threshold': PERC_AUDIENCE_THRESHOLD
                 })
 
-            logger.info(f"✅ Found {len(results)} merchant-community pairs for {team_name}")
-
+            logger.info(f"📊 {team_name} Summary: {qualifying_count}/{len(results)} qualify")
             return results
 
         except Exception as e:
-            logger.error(f"Error fetching data for {team_name}: {e}")
+            logger.error(f"Error for {team_name}: {e}")
             import traceback
             traceback.print_exc()
             return []
 
     def pull_all_merchants(self):
-        """Pull merchants for all teams and save to CSV"""
-
         all_results = []
 
         for team_config in self.teams:
@@ -290,69 +306,71 @@ class MerchantPull:
             all_results.extend(team_results)
 
         if not all_results:
-            logger.error("No merchant data found for any team!")
+            logger.error("No merchant data found!")
             return None
 
-        # Convert to DataFrame
         df = pd.DataFrame(all_results)
-
-        # Format percentage columns for display
         df['Community_Perc_Display'] = df['Community_Perc_Audience'].apply(lambda x: f"{x:.2%}")
         df['Merchant_Perc_Display'] = df['Merchant_Perc_Audience'].apply(lambda x: f"{x:.2%}")
 
-        # Save to CSV with raw values
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_path = self.output_dir / f"merchant_pull_{timestamp}.csv"
+        csv_path = self.output_dir / f"merchant_pull_with_thresholds_{timestamp}.csv"
         df.to_csv(csv_path, index=False)
 
         logger.info(f"\n✅ Saved merchant data to: {csv_path}")
 
-        # Print summary
+        # Enhanced summary
+        total_merchants = len(df)
+        qualifying_merchants = len(df[df['Meets_Threshold']])
+
         print("\n📊 Summary:")
-        print(f"Total merchant-community pairs: {len(df)}")
-        print(f"\nBy Team:")
+        print(f"Total merchant-community pairs: {total_merchants}")
+        print(
+            f"Merchants meeting threshold: {qualifying_merchants} ({qualifying_merchants / total_merchants * 100:.1f}%)")
+        print(
+            f"Merchants filtered out: {total_merchants - qualifying_merchants} ({(total_merchants - qualifying_merchants) / total_merchants * 100:.1f}%)")
+
+        print("\nBy Team:")
         for team in df['Team'].unique():
-            team_count = len(df[df['Team'] == team])
-            print(f"  - {team}: {team_count} pairs")
+            team_df = df[df['Team'] == team]
+            team_qualifying = len(team_df[team_df['Meets_Threshold']])
+            print(f"  - {team}: {team_qualifying}/{len(team_df)} qualify")
 
-        print(f"\nUnique merchants: {df['Merchant'].nunique()}")
-        print(f"Unique communities: {df['Community'].nunique()}")
+        print("\nBy Filter Reason:")
+        filter_counts = df['Filter_Reason'].value_counts()
+        for reason, count in filter_counts.items():
+            print(f"  - {reason}: {count}")
 
-        # Show sample data with formatted percentages
-        print("\nSample data (first 10 rows):")
         display_columns = ['Team', 'Community', 'Community_Perc_Display', 'Merchant',
-                          'Merchant_Perc_Display', 'Merchant_Perc_Index', 'Verb']
-        display_df = df[display_columns].head(10)
-        display_df.columns = ['Team', 'Community', 'Comm %', 'Merchant', 'Merch %', 'Index', 'Verb']
+                           'Merchant_Perc_Display', 'Audience_Count', 'Threshold_Status', 'Filter_Reason', 'Verb']
+        display_df = df[display_columns].head(20)  # Show all results
+        display_df.columns = ['Team', 'Community', 'Comm %', 'Merchant', 'Merch %', 'Count', 'Status', 'Reason', 'Verb']
+        print("\nAll Results:")
         print(display_df.to_string(index=False))
 
-        # Also save a unique merchants list
-        unique_merchants = sorted(df['Merchant'].unique())
+        # Save qualifying merchants list for backwards compatibility
+        qualifying_merchants = df[df['Meets_Threshold']]['Merchant'].unique()
         unique_path = self.output_dir / f"unique_merchants_{timestamp}.txt"
         with open(unique_path, 'w') as f:
-            for merchant in unique_merchants:
+            for merchant in sorted(qualifying_merchants):
                 f.write(f"{merchant}\n")
 
-        print(f"\n✅ Also saved unique merchant list to: {unique_path}")
-
+        print(f"\n✅ Saved qualifying merchant list to: {unique_path}")
         return df
 
 
 def main():
-    """Main execution function"""
-
-    print("🏆 Merchant Pull Script with Audience Percentages")
+    print("🏆 Merchant Pull Script with Threshold Status")
     print("=" * 60)
-    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Thresholds: Audience Count > {AUDIENCE_COUNT_THRESHOLD}, Perc Audience >= {PERC_AUDIENCE_THRESHOLD:.1%}")
+    print()
 
-    # Initialize and run
     puller = MerchantPull()
-
     try:
-        df = puller.pull_all_merchants()
-
+        puller.pull_all_merchants()
     except Exception as e:
-        logger.error(f"Error in main process: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
 
