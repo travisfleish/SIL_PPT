@@ -7,9 +7,7 @@ Fixed f-string syntax errors
 Added Red Hat Display font support for PowerPoint
 """
 
-import os
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -19,15 +17,13 @@ project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
 
 # Import your centralized connection manager
-from snowflake_connection import get_connection, query_to_dataframe, with_snowflake_connection
+from snowflake_connection import get_connection, query_to_dataframe
 
 # PowerPoint imports
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
-from pptx.table import Table
 
 import warnings
 
